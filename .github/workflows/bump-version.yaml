@@ -27,7 +27,6 @@ jobs:
         run: cargo test
   bump:
     needs: test
-    if: github.ref_name == 'release'
     runs-on: ubuntu-latest
     steps:
       - name: Bump version and push tag

@@ -57,15 +57,15 @@ jobs:
         run: |
           sed -i 's/\/index/.\/index/g' dist/index.html
           sed -i 's/\/${{ env.GAME_EXECUTABLE_NAME }}/.\/${{ env.GAME_EXECUTABLE_NAME }}/g' dist/index.html
-      #- name: Deploy Netlify
-      #  uses: jsmrcaga/action-netlify-deploy@v2.0.0
-      #  with:
-      #    NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY }}
-      #    NETLIFY_SITE_ID: c8b3be60-1e1a-402d-98e6-0eacc4109fb4
-      #    NETLIFY_DEPLOY_TO_PROD: true
-      #    build_directory: dist/
-      #    install_command: "echo Skipping installing the dependencies"
-      #    build_command: "echo Skipping building the web files"
+      - name: Deploy Netlify
+        uses: jsmrcaga/action-netlify-deploy@v2.0.0
+        with:
+          NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY }}
+          NETLIFY_SITE_ID: 31c8a425-c51e-4097-9fb3-a2ff25c93b95
+          NETLIFY_DEPLOY_TO_PROD: true
+          build_directory: dist/
+          install_command: "echo Skipping installing the dependencies"
+          build_command: "echo Skipping building the web files"
       - name: Zip release
         uses: vimtor/action-zip@v1
         with:

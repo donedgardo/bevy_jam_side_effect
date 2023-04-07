@@ -2,9 +2,7 @@ use bevy::prelude::*;
 use bevy::core_pipeline::clear_color::ClearColorConfig;
 use bevy::input::keyboard::KeyboardInput;
 use bevy::window::PrimaryWindow;
-use bevy_inspector_egui::quick::WorldInspectorPlugin;
-use bevy_ecs_ldtk::{EntityInstance, LdtkPlugin, LdtkSettings, LdtkWorldBundle, LevelSelection, LevelSpawnBehavior};
-use bevy_inspector_egui::egui::Key;
+use bevy_ecs_ldtk::{EntityInstance, LdtkPlugin, LdtkWorldBundle, LevelSelection};
 use bevy_rapier2d::prelude::*;
 
 #[derive(States, Clone, PartialEq, Eq, Debug, Hash, Default)]
@@ -21,16 +19,21 @@ fn main() {
         .set(AssetPlugin {
             watch_for_changes: true,
             ..Default::default()
-        }))
-        .add_plugin(RapierPhysicsPlugin::<NoUserData>::default())
-        .add_plugin(LdtkPlugin)
-        .add_plugin(WorldInspectorPlugin::new());
-    // app.insert_resource(LdtkSettings {
-    //     level_spawn_behavior: LevelSpawnBehavior::UseWorldTranslation {
-    //         load_level_neighbors: true
-    //     },
-    //     ..default()
-    // });
+        })
+        .set(WindowPlugin {
+            primary_window: Option::from(Window {
+                fit_canvas_to_parent: true,
+                ..default()
+            }),
+            ..default()
+        }));
+    app.add_plugin(RapierPhysicsPlugin::<NoUserData>::default());
+    app.add_plugin(LdtkPlugin);
+    #[cfg(feature = "debug-mode")]
+    {
+        use bevy_inspector_egui::quick::WorldInspectorPlugin;
+        app.add_plugin(WorldInspectorPlugin::new());
+    }
     app.add_state::<AppState>();
     app.add_system(setup_main.in_schedule(OnEnter(AppState::MainMenu)));
     app.add_system(exit_main.in_schedule(OnExit(AppState::MainMenu)));
@@ -291,20 +294,18 @@ fn get_rotation_from_to(from: Vec2, to: Vec2) -> Quat {
 }
 
 fn boost_input(
-   mut ship_q: Query<&mut Speed, With<Ship>>,
-   key_input: Res<Input<KeyCode>>,
+    mut ship_q: Query<&mut Speed, With<Ship>>,
+    key_input: Res<Input<KeyCode>>,
 ) {
     if key_input.just_pressed(KeyCode::LShift) {
         for mut speed in ship_q.iter_mut() {
-           speed.0 += 70. ;
+            speed.0 += 70.;
         }
     } else if key_input.just_released(KeyCode::LShift) {
         for mut speed in ship_q.iter_mut() {
-            speed.0 -= 70. ;
+            speed.0 -= 70.;
         }
     }
-
-
 }
 
 fn beam_input(
@@ -328,7 +329,7 @@ fn movement_input(
     mut player_q: Query<(&mut Velocity, &Speed), With<Ship>>,
     keyboard_input: Res<Input<KeyCode>>,
 ) {
-    for (mut velocity, speed) in player_q.iter_mut(){
+    for (mut velocity, speed) in player_q.iter_mut() {
         let mut direction = Vec2::default();
         handle_keyboard_input(&keyboard_input, &mut direction);
         velocity.linvel = direction.normalize_or_zero() * speed.0;
