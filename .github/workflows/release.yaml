@@ -1,0 +1,81 @@
+name: ci-cd-pipeline
+
+on:
+  push:
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+*"
+
+concurrency:
+  group: '${{ github.workflow }} @ ${{ github.event.pull_request.head.label || github.head_ref || github.ref }}'
+  cancel-in-progress: true
+
+env:
+  GAME_EXECUTABLE_NAME: bobs-adventure
+  GAME_OSX_APP_NAME: BobsAdventure
+
+jobs:
+
+  build-web:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+      - uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+      - name: Install rust toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          override: true
+      - name: Install Dependencies
+        run: sudo apt-get update; sudo apt-get install pkg-config libx11-dev libasound2-dev libudev-dev
+      - name: Install trunk
+        uses: jetli/trunk-action@v0.1.0
+        with:
+          version: latest
+      - name: Add wasm target
+        run: |
+          rustup target add wasm32-unknown-unknown
+          cargo install --locked wasm-bindgen-cli
+      - name: Build Release
+        run: |
+          trunk build --release
+      - name: optimize Wasm
+        uses: NiklasEi/wasm-opt-action@v2
+        with:
+          file: dist/*.wasm
+        # Trunk cannot import assets from relative paths (see e.g. https://github.com/thedodd/trunk/issues/395)
+        # On sites like itch.io, we don't know on which base path the game gets served, so we need to rewrite all links to be relative
+      - name: Make paths relative
+        run: |
+          sed -i 's/\/index/.\/index/g' dist/index.html
+          sed -i 's/\/${{ env.GAME_EXECUTABLE_NAME }}/.\/${{ env.GAME_EXECUTABLE_NAME }}/g' dist/index.html
+      #- name: Deploy Netlify
+      #  uses: jsmrcaga/action-netlify-deploy@v2.0.0
+      #  with:
+      #    NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY }}
+      #    NETLIFY_SITE_ID: c8b3be60-1e1a-402d-98e6-0eacc4109fb4
+      #    NETLIFY_DEPLOY_TO_PROD: true
+      #    build_directory: dist/
+      #    install_command: "echo Skipping installing the dependencies"
+      #    build_command: "echo Skipping building the web files"
+      - name: Zip release
+        uses: vimtor/action-zip@v1
+        with:
+          files: dist/
+          dest: ${{ env.GAME_EXECUTABLE_NAME }}_web.zip
+      - name: Upload release
+        uses: svenstaro/upload-release-action@v2
+        with:
+          repo_token: ${{ secrets.UPLOAD_TOKEN }}
+          file: ${{ env.GAME_EXECUTABLE_NAME }}_web.zip
+          asset_name: ${{ env.GAME_EXECUTABLE_NAME }}_${{ github.ref_name }}_web.zip
+          tag: ${{ github.ref }}
+          overwrite: true

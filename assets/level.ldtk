@@ -315,8 +315,8 @@
 			"identifier": "Level_1",
 			"iid": "740c3c80-c640-11ed-a4d7-8f8a3fab073c",
 			"uid": 14,
-			"worldX": 656,
-			"worldY": 288,
+			"worldX": 1312,
+			"worldY": 272,
 			"worldDepth": 0,
 			"pxWid": 560,
 			"pxHei": 384,
@@ -358,7 +358,7 @@
 					"entityInstances": [
 						{
 							"__identifier": "Player",
-							"__grid": [16,10],
+							"__grid": [16,12],
 							"__pivot": [0,0],
 							"__tags": [],
 							"__tile": { "tilesetUid": 11, "x": 0, "y": 0, "w": 32, "h": 32 },
@@ -367,7 +367,7 @@
 							"width": 32,
 							"height": 32,
 							"defUid": 7,
-							"px": [256,160],
+							"px": [256,192],
 							"fieldInstances": []
 						}
 					]
