@@ -1,6 +1,6 @@
+use benimator::FrameRate;
 use bevy::prelude::*;
 use bevy::core_pipeline::clear_color::ClearColorConfig;
-use bevy::input::keyboard::KeyboardInput;
 use bevy::window::PrimaryWindow;
 use bevy_ecs_ldtk::{EntityInstance, LdtkPlugin, LdtkWorldBundle, LevelSelection};
 use bevy_rapier2d::prelude::*;
@@ -9,6 +9,7 @@ use bevy_rapier2d::prelude::*;
 enum AppState {
     #[default]
     MainMenu,
+    Intro,
     InGame,
 }
 
@@ -37,14 +38,16 @@ fn main() {
     app.add_state::<AppState>();
     app.add_system(setup_main.in_schedule(OnEnter(AppState::MainMenu)));
     app.add_system(exit_main.in_schedule(OnExit(AppState::MainMenu)));
+    app.add_system(camera_follow_ship.in_set(OnUpdate(AppState::InGame)));
+    app.add_system(setup_intro.in_schedule(OnEnter(AppState::Intro)));
     app.add_system(position_camera_at_ship);
     app.add_system(movement_input);
     app.add_system(spawn_entity_instances);
     app.add_system(my_cursor_system);
     app.add_system(beam_input);
     app.add_system(boost_input);
-    app.add_system(camera_follow_ship.in_set(OnUpdate(AppState::InGame)));
     app.add_system(button_interactions_system);
+    app.add_system(animation_system);
     app.run();
 }
 
@@ -53,6 +56,9 @@ struct Ship;
 
 #[derive(Component)]
 struct InteractLightBeam;
+
+#[derive(Component)]
+struct LightSpeed;
 
 #[derive(Resource)]
 struct LdtkImageHolder(Handle<Image>);
@@ -68,6 +74,12 @@ struct StartAdventureButton;
 
 #[derive(Component)]
 struct MainMenuUI;
+
+#[derive(Component, Deref)]
+struct Animation(benimator::Animation);
+
+#[derive(Default, Component, Deref, DerefMut)]
+struct AnimationState(benimator::State);
 
 
 fn setup_main(
@@ -131,7 +143,7 @@ fn setup_main(
 
     let mut camera_bundle = Camera2dBundle::default();
     camera_bundle.camera_2d.clear_color = ClearColorConfig::Custom(Color::hex("1B0A28").unwrap());
-    camera_bundle.projection.scale *= 0.50;
+    camera_bundle.projection.scale *= 0.45;
 
     commands.spawn((MainCamera, camera_bundle));
     commands.spawn(LdtkWorldBundle {
@@ -153,8 +165,13 @@ fn exit_main(
     }
 }
 
+fn setup_intro(mut commands: Commands, light_query: Query<Entity, With<LightSpeed>>) {
+    for entity in light_query.iter() {
+        commands.entity(entity).insert(Visibility::Visible);
+    }
+}
+
 fn button_interactions_system(
-    mut commands: Commands,
     mut interaction_query: Query<(&Interaction, &Children),
         (Changed<Interaction>, With<StartAdventureButton>)>,
     mut text_query: Query<&mut Text>,
@@ -165,8 +182,7 @@ fn button_interactions_system(
         let mut text = text_query.get_mut(children[0]).unwrap();
         match *interaction {
             Interaction::Clicked => {
-                commands.insert_resource(LevelSelection::Index(0));
-                next_state.set(AppState::InGame);
+                next_state.set(AppState::Intro);
             }
             Interaction::Hovered => {
                 text.sections[0].value = "- New Adventure -".to_string();
@@ -178,11 +194,13 @@ fn button_interactions_system(
     }
 }
 
+
 fn spawn_entity_instances(
     mut commands: Commands,
     player_q: Query<(Entity, &EntityInstance, &Transform, &GlobalTransform), (Added<EntityInstance>, Without<Ship>)>,
     mut bob_ship_q: Query<&mut Transform, With<Ship>>,
     asset_server: Res<AssetServer>,
+    mut texture_atlases: ResMut<Assets<TextureAtlas>>,
 ) {
     for
     (entity, instance, p_transform, global_transform)
@@ -191,10 +209,14 @@ fn spawn_entity_instances(
             "Player" => {
                 if bob_ship_q.is_empty() {
                     println!("Creating Bob's Ship");
+                    let texture_handle = asset_server.load("Bob's Ship-sheet.png");
+                    let texture_atlas =
+                        TextureAtlas::from_grid(texture_handle, Vec2::new(32.0, 32.0), 2, 1, None, None);
+                    let texture_atlas_handle = texture_atlases.add(texture_atlas);
                     let bob_bundle = (
                         Ship,
-                        SpriteBundle {
-                            texture: asset_server.load("Bob's Ship.png"),
+                        SpriteSheetBundle {
+                            texture_atlas: texture_atlas_handle,
                             transform: *p_transform,
                             ..default()
                         },
@@ -202,6 +224,7 @@ fn spawn_entity_instances(
                         GravityScale(0.),
                         Velocity::zero(),
                         Speed(90.),
+                        AnimationState::default()
                     );
                     commands.entity(entity).insert(bob_bundle).with_children(|parent| {
                         let mut light_beam_translation = Transform::from(*global_transform);
@@ -221,6 +244,27 @@ fn spawn_entity_instances(
                         transform.translation = p_transform.translation;
                     }
                 }
+            }
+            "LightSpeed" => {
+                let texture_handle = asset_server.load("light speed.png");
+                let texture_atlas =
+                    TextureAtlas::from_grid(texture_handle, Vec2::new(448., 224.), 16, 1, None, None);
+                let texture_atlas_handle = texture_atlases.add(texture_atlas);
+                let animation = Animation(benimator::Animation::from_indices(
+                    0..=15,
+                    FrameRate::from_fps(10.0),
+                ));
+                commands.entity(entity).insert((
+                    LightSpeed,
+                    SpriteSheetBundle {
+                        texture_atlas: texture_atlas_handle,
+                        transform: *p_transform,
+                        visibility: Visibility::Hidden,
+                        ..default()
+                    },
+                    animation,
+                    AnimationState::default(),
+                ));
             }
             _ => {}
         }
@@ -293,35 +337,66 @@ fn get_rotation_from_to(from: Vec2, to: Vec2) -> Quat {
     Quat::from_axis_angle(Vec3::new(0., 0., 1.), angle)
 }
 
+// TODO: seperate animation and physics logic into different system, including beam input system
 fn boost_input(
-    mut ship_q: Query<&mut Speed, With<Ship>>,
+    mut commands: Commands,
+    mut ship_q: Query<(Entity, &mut Speed), With<Ship>>,
     key_input: Res<Input<KeyCode>>,
 ) {
     if key_input.just_pressed(KeyCode::LShift) {
-        for mut speed in ship_q.iter_mut() {
+        for (ship, mut speed) in ship_q.iter_mut() {
             speed.0 += 70.;
+            add_blinking_animation(&mut commands, ship);
         }
-    } else if key_input.just_released(KeyCode::LShift) {
-        for mut speed in ship_q.iter_mut() {
+    }
+    if key_input.just_released(KeyCode::LShift) {
+        for (ship, mut speed) in ship_q.iter_mut() {
             speed.0 -= 70.;
+            commands.entity(ship).remove::<Animation>();
         }
     }
 }
 
 fn beam_input(
     mut commands: Commands,
+    mouse_input: Res<Input<MouseButton>>,
     beam_q: Query<Entity,
         With<InteractLightBeam>>,
-    mouse_input: Res<Input<MouseButton>>,
+    ship_q: Query<Entity, With<Ship>>,
 ) {
-    if mouse_input.pressed(MouseButton::Left) {
+    if mouse_input.just_pressed(MouseButton::Left) {
         for beam in beam_q.iter() {
             commands.entity(beam).insert(Visibility::Visible);
         }
-    } else {
+        for ship in ship_q.iter() {
+            add_blinking_animation(&mut commands, ship);
+        }
+    }
+    if mouse_input.just_released(MouseButton::Left) {
         for beam in beam_q.iter() {
             commands.entity(beam).insert(Visibility::Hidden);
         }
+        for ship in ship_q.iter() {
+            commands.entity(ship).remove::<Animation>();
+        }
+    }
+}
+
+fn add_blinking_animation(commands: &mut Commands, ship: Entity) {
+    let animation = Animation(benimator::Animation::from_indices(
+        0..=1,
+        FrameRate::from_fps(7.0),
+    ));
+    commands.entity(ship).insert(animation);
+}
+
+fn animation_system(
+    time: Res<Time>,
+    mut query: Query<(&mut AnimationState, &mut TextureAtlasSprite, &Animation)>,
+) {
+    for (mut state, mut texture, animation) in query.iter_mut() {
+        state.update(animation, time.delta());
+        texture.index = state.frame_index();
     }
 }
 
