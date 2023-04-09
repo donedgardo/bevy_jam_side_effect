@@ -5,6 +5,8 @@ use bevy_rapier2d::prelude::*;
 use animation::Animation;
 use camera::MainCamera;
 use movement::Speed;
+use crate::level::{Herbs, ResourceNameplate};
+use crate::ui::PanelText;
 
 mod ui;
 mod level;
@@ -41,15 +43,21 @@ fn main() {
     {
         use bevy_inspector_egui::quick::WorldInspectorPlugin;
         app.add_plugin(WorldInspectorPlugin::new());
+        app.add_plugin(RapierDebugRenderPlugin::default());
     }
     app.add_state::<AppState>();
+    app.insert_resource(UnderBeamItems(vec![]));
     app.add_system(setup_start_menu.in_schedule(OnEnter(AppState::MainMenu)));
     app.add_system(camera::setup_main_camera.in_schedule(OnEnter(AppState::MainMenu)));
     app.add_system(ui::menu_button_interactions_system.in_set(OnUpdate(AppState::MainMenu)));
-    app.add_system(ui::exit_main.in_schedule(OnExit(AppState::MainMenu)));
+    app.add_system(ui::clean_main_ui.in_schedule(OnExit(AppState::MainMenu)));
     app.add_system(ui::setup_intro.in_schedule(OnEnter(AppState::Intro)));
     app.add_system(ui::dialog_interaction_system.in_set(OnUpdate(AppState::Intro)));
+    app.add_system(ui::clean_intro_ui.in_schedule(OnExit(AppState::Intro)));
+    app.add_system(ui::setup_game_ui.in_schedule(OnEnter(AppState::InGame)));
     app.add_system(camera_follow_ship.in_set(OnUpdate(AppState::InGame)));
+    app.add_system(beam_up.in_set(OnUpdate(AppState::InGame)));
+    app.add_system(panel_text_update.in_set(OnUpdate(AppState::InGame)));
     app.add_system(position_camera_at_ship);
     app.add_system(movement::movement_input);
     app.add_system(level::spawn_entity_instances);
@@ -57,6 +65,7 @@ fn main() {
     app.add_system(beam_input);
     app.add_system(boost_input);
     app.add_system(animation::animation_system);
+    app.add_system(handle_collisions);
     app.run();
 }
 
@@ -69,6 +78,94 @@ struct InteractLightBeam;
 #[derive(Resource)]
 struct LdtkImageHolder(Handle<Image>);
 
+#[derive(Resource)]
+struct UnderBeamItems(Vec<Entity>);
+
+fn handle_collisions(
+    mut commands: Commands,
+    mut collision_events: EventReader<CollisionEvent>,
+    herbs_query: Query<(&Children, &Herbs)>,
+    resource_label_query: Query<&ResourceNameplate>,
+    mut description_text_query: Query<&mut Text, With<PanelText>>,
+    mut under_beam: ResMut<UnderBeamItems>,
+) {
+    for collision_event in collision_events.iter() {
+        match collision_event {
+            CollisionEvent::Started(e1, e2, _) => {
+                for entity in vec![e1, e2].into_iter() {
+                    if let Ok((children, herb)) = herbs_query.get(*entity) {
+                        under_beam.0.push(*entity);
+                        for mut text in description_text_query.iter_mut() {
+                            text.sections[0].value = herb.description.clone();
+                        }
+                        for child in children.iter() {
+                            if resource_label_query.get(*child).is_ok() {
+                                commands.entity(*child).insert(Visibility::Visible);
+                            }
+                        }
+                    }
+                }
+            }
+            CollisionEvent::Stopped(e1, e2, _) => {
+                for entity in vec![e1, e2].into_iter() {
+                    if let Ok((children, herb)) = herbs_query.get(*entity) {
+                        if let Some(index) = under_beam.0.iter().position(|x| x == entity) {
+                            under_beam.0.remove(index);
+                        };
+                        if under_beam.0.is_empty() {
+                            for mut text in description_text_query.iter_mut() {
+                                text.sections[0].value = "".to_string();
+                            }
+                        } else {
+                            if let Ok((_, herb)) = herbs_query.get(*under_beam.0.last().unwrap()) {
+                                for mut text in description_text_query.iter_mut() {
+                                    text.sections[0].value = herb.description.to_string();
+                                }
+                            }
+                        }
+                        for child in children.iter() {
+                            if resource_label_query.get(*child).is_ok() {
+                                commands.entity(*child).insert(Visibility::Hidden);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn panel_text_update(
+    mut panel_query: Query<&mut Text, With<PanelText>>,
+    under_beam: Res<UnderBeamItems>,
+    herb_query: Query<&Herbs>,
+) {
+    for mut text in panel_query.iter_mut() {
+        if under_beam.0.is_empty() {
+            text.sections[0].value = "".to_string();
+        } else {
+            let item = under_beam.0.last().unwrap();
+            if let Ok(herb) = herb_query.get(*item) {
+                text.sections[0].value = herb.description.clone();
+            }
+        }
+
+    }
+
+}
+
+fn beam_up(
+    mut commands: Commands,
+    mut under_beam: ResMut<UnderBeamItems>,
+    mouse_input: Res<Input<MouseButton>>,
+    herb_query: Query<&Herbs>,
+) {
+    if !mouse_input.just_pressed(MouseButton::Right) || under_beam.0.is_empty() { return; }
+    let item = under_beam.0.pop().unwrap();
+    if let Ok(herb) = herb_query.get(item) {
+        commands.entity(item).despawn_recursive();
+    }
+}
 
 fn setup_start_menu(
     mut commands: Commands,
@@ -173,13 +270,18 @@ fn boost_input(
 fn beam_input(
     mut commands: Commands,
     mouse_input: Res<Input<MouseButton>>,
-    beam_q: Query<Entity,
-        With<InteractLightBeam>>,
+    beam_q: Query<Entity, With<InteractLightBeam>>,
     ship_q: Query<Entity, With<Ship>>,
 ) {
     if mouse_input.just_pressed(MouseButton::Left) {
         for beam in beam_q.iter() {
-            commands.entity(beam).insert(Visibility::Visible);
+            commands.entity(beam).insert(
+                (Visibility::Visible,
+                 Collider::triangle(Vec2::new(-55., 0.),
+                                    Vec2::new(56., 18.),
+                                    Vec2::new(56., -18.)),
+                 ActiveEvents::COLLISION_EVENTS,
+                 Sensor));
         }
         for ship in ship_q.iter() {
             animation::add_blinking_animation(&mut commands, ship);
@@ -188,6 +290,7 @@ fn beam_input(
     if mouse_input.just_released(MouseButton::Left) {
         for beam in beam_q.iter() {
             commands.entity(beam).insert(Visibility::Hidden);
+            commands.entity(beam).remove::<Collider>().remove::<Sensor>();
         }
         for ship in ship_q.iter() {
             commands.entity(ship).remove::<Animation>();

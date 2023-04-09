@@ -1,13 +1,24 @@
-use bevy::prelude::{Added, Commands, Component, default, Entity, GlobalTransform, Query, Res, ResMut, SpriteBundle, SpriteSheetBundle, TextureAtlas, Transform, Visibility, With, Without};
-use bevy_ecs_ldtk::EntityInstance;
+use bevy::prelude::*;
 use bevy::asset::{Assets, AssetServer};
 use bevy::math::Vec2;
-use bevy_rapier2d::dynamics::{GravityScale, RigidBody, Velocity};
-use benimator::FrameRate;
 use bevy::hierarchy::BuildChildren;
+use bevy_ecs_ldtk::EntityInstance;
+use bevy_rapier2d::dynamics::{GravityScale, RigidBody, Velocity};
+use bevy_rapier2d::geometry::{Collider, Sensor};
+use benimator::FrameRate;
+
 use crate::{InteractLightBeam, Ship};
 use crate::animation::{Animation, AnimationState};
 use crate::movement::Speed;
+
+#[derive(Component)]
+pub struct Herbs {
+    pub(crate) description: String,
+    texture: Handle<Image>,
+}
+
+#[derive(Component)]
+pub struct ResourceNameplate;
 
 pub fn spawn_entity_instances(
     mut commands: Commands,
@@ -22,7 +33,6 @@ pub fn spawn_entity_instances(
         match instance.identifier.as_ref() {
             "Player" => {
                 if bob_ship_q.is_empty() {
-                    println!("Creating Bob's Ship");
                     let texture_handle = asset_server.load("Bob's Ship-sheet.png");
                     let texture_atlas =
                         TextureAtlas::from_grid(texture_handle, Vec2::new(32.0, 32.0), 2, 1, None, None);
@@ -34,6 +44,7 @@ pub fn spawn_entity_instances(
                             transform: *p_transform,
                             ..default()
                         },
+                        Collider::triangle(Vec2::new(-11., -16.), Vec2::new(-11., 16.), Vec2::new(16., 0.)),
                         RigidBody::Dynamic,
                         GravityScale(0.),
                         Velocity::zero(),
@@ -53,7 +64,6 @@ pub fn spawn_entity_instances(
                                       }));
                     });
                 } else {
-                    println!("Moving Bob's Ship");
                     for mut transform in bob_ship_q.iter_mut() {
                         transform.translation = p_transform.translation;
                     }
@@ -79,6 +89,39 @@ pub fn spawn_entity_instances(
                     animation,
                     AnimationState::default(),
                 ));
+            }
+            "Herbs" => {
+                let texture_handle = asset_server.load("resources.png");
+                let texture_atlas =
+                    TextureAtlas::from_grid(texture_handle.clone(), Vec2::new(16., 16.), 1, 1, None, None);
+                let texture_atlas_handle = texture_atlases.add(texture_atlas);
+                commands.entity(entity).insert((
+                    Herbs {
+                        description: "Herbs:\nGain Life Support.\nSide Effects: ???.\nRight-click: Beam up.".to_string(),
+                        texture: texture_handle.clone(),
+                    },
+                    Collider::ball(8.),
+                    Sensor,
+                    SpriteSheetBundle {
+                        texture_atlas: texture_atlas_handle,
+                        transform: *p_transform,
+                        ..default()
+                    },
+                )).with_children(|parent| {
+                    parent.spawn((
+                        ResourceNameplate,
+                        Text2dBundle {
+                            text: Text::from_section("Herbs", TextStyle {
+                                font: asset_server.load("fonts/static/JetBrainsMono-Light.ttf"),
+                                font_size: 16.,
+                                ..default()
+                            }),
+                            visibility: Visibility::Hidden,
+                            transform: Transform::from_xyz(0., 12., 0.).with_scale(Vec3::splat(0.5)),
+                            ..default()
+                        },
+                    ));
+                });
             }
             _ => {}
         }
