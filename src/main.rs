@@ -162,7 +162,7 @@ fn beam_up(
 ) {
     if !mouse_input.just_pressed(MouseButton::Right) || under_beam.0.is_empty() { return; }
     let item = under_beam.0.pop().unwrap();
-    if let Ok(herb) = herb_query.get(item) {
+    if herb_query.get(item).is_ok() {
         commands.entity(item).despawn_recursive();
     }
 }
