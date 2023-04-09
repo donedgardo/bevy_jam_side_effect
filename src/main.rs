@@ -1,12 +1,19 @@
-use benimator::FrameRate;
 use bevy::prelude::*;
-use bevy::core_pipeline::clear_color::ClearColorConfig;
 use bevy::window::PrimaryWindow;
-use bevy_ecs_ldtk::{EntityInstance, LdtkPlugin, LdtkWorldBundle, LevelSelection};
+use bevy_ecs_ldtk::{LdtkPlugin, LdtkWorldBundle, LevelSelection};
 use bevy_rapier2d::prelude::*;
+use animation::Animation;
+use camera::MainCamera;
+use movement::Speed;
+
+mod ui;
+mod level;
+mod animation;
+mod camera;
+mod movement;
 
 #[derive(States, Clone, PartialEq, Eq, Debug, Hash, Default)]
-enum AppState {
+pub enum AppState {
     #[default]
     MainMenu,
     Intro,
@@ -36,239 +43,45 @@ fn main() {
         app.add_plugin(WorldInspectorPlugin::new());
     }
     app.add_state::<AppState>();
-    app.add_system(setup_main.in_schedule(OnEnter(AppState::MainMenu)));
-    app.add_system(exit_main.in_schedule(OnExit(AppState::MainMenu)));
+    app.add_system(setup_start_menu.in_schedule(OnEnter(AppState::MainMenu)));
+    app.add_system(camera::setup_main_camera.in_schedule(OnEnter(AppState::MainMenu)));
+    app.add_system(ui::menu_button_interactions_system.in_set(OnUpdate(AppState::MainMenu)));
+    app.add_system(ui::exit_main.in_schedule(OnExit(AppState::MainMenu)));
+    app.add_system(ui::setup_intro.in_schedule(OnEnter(AppState::Intro)));
+    app.add_system(ui::dialog_interaction_system.in_set(OnUpdate(AppState::Intro)));
     app.add_system(camera_follow_ship.in_set(OnUpdate(AppState::InGame)));
-    app.add_system(setup_intro.in_schedule(OnEnter(AppState::Intro)));
     app.add_system(position_camera_at_ship);
-    app.add_system(movement_input);
-    app.add_system(spawn_entity_instances);
+    app.add_system(movement::movement_input);
+    app.add_system(level::spawn_entity_instances);
     app.add_system(my_cursor_system);
     app.add_system(beam_input);
     app.add_system(boost_input);
-    app.add_system(button_interactions_system);
-    app.add_system(animation_system);
+    app.add_system(animation::animation_system);
     app.run();
 }
 
 #[derive(Component)]
-struct Ship;
+pub struct Ship;
 
 #[derive(Component)]
 struct InteractLightBeam;
 
-#[derive(Component)]
-struct LightSpeed;
-
 #[derive(Resource)]
 struct LdtkImageHolder(Handle<Image>);
 
-#[derive(Component)]
-struct Speed(f32);
 
-#[derive(Component)]
-struct MainCamera;
-
-#[derive(Component)]
-struct StartAdventureButton;
-
-#[derive(Component)]
-struct MainMenuUI;
-
-#[derive(Component, Deref)]
-struct Animation(benimator::Animation);
-
-#[derive(Default, Component, Deref, DerefMut)]
-struct AnimationState(benimator::State);
-
-
-fn setup_main(
+fn setup_start_menu(
     mut commands: Commands,
     asset_server: Res<AssetServer>,
 ) {
-    commands.spawn((MainMenuUI, NodeBundle {
-        style: Style {
-            justify_content: JustifyContent::Center,
-            align_items: AlignItems::Center,
-            size: Size::new(Val::Percent(100.), Val::Percent(100.)),
-            ..default()
-        },
-        ..default()
-    })).with_children(|parent| {
-        parent.spawn(NodeBundle {
-            style: Style {
-                flex_direction: FlexDirection::Column,
-                size: Size::new(Val::Percent(100.), Val::Px(350.)),
-                justify_content: JustifyContent::SpaceBetween,
-                align_items: AlignItems::Center,
-                ..default()
-            },
-            ..default()
-        }).with_children(|parent| {
-            parent.spawn(TextBundle::from_section(
-                "Bob's Adventure",
-                TextStyle {
-                    font: asset_server.load("fonts/JollyLodger-Regular.ttf"),
-                    font_size: 128.,
-                    color: Color::hex("#FFF").unwrap(),
-                },
-            ));
-            parent.spawn((StartAdventureButton, ButtonBundle {
-                style: Style {
-                    size: Size::UNDEFINED,
-                    justify_content: JustifyContent::Center,
-                    align_items: AlignItems::Center,
-
-                    ..default()
-                },
-                background_color: BackgroundColor(Color::Rgba {
-                    red: 0.0,
-                    green: 0.0,
-                    blue: 0.0,
-                    alpha: 0.0,
-                }),
-                ..default()
-            }, )).with_children(|parent| {
-                parent.spawn(TextBundle::from_section(
-                    "New Adventure",
-                    TextStyle {
-                        font: asset_server.load("fonts/NanumMyeongjo-Regular.ttf"),
-                        font_size: 40.,
-                        ..default()
-                    },
-                ));
-            });
-        });
-    });
-
-    let mut camera_bundle = Camera2dBundle::default();
-    camera_bundle.camera_2d.clear_color = ClearColorConfig::Custom(Color::hex("1B0A28").unwrap());
-    camera_bundle.projection.scale *= 0.45;
-
-    commands.spawn((MainCamera, camera_bundle));
     commands.spawn(LdtkWorldBundle {
         ldtk_handle: asset_server.load("level.ldtk"),
         ..Default::default()
     });
     // bug workaround: https://github.com/Trouv/bevy_ecs_ldtk/issues/111
-
     commands.insert_resource(LdtkImageHolder(asset_server.load("Laser Lvl 1.png")));
     commands.insert_resource(LevelSelection::Index(1));
-}
-
-fn exit_main(
-    mut commands: Commands,
-    query: Query<Entity, With<MainMenuUI>>,
-) {
-    for entity in query.iter() {
-        commands.entity(entity).despawn_recursive();
-    }
-}
-
-fn setup_intro(mut commands: Commands, light_query: Query<Entity, With<LightSpeed>>) {
-    for entity in light_query.iter() {
-        commands.entity(entity).insert(Visibility::Visible);
-    }
-}
-
-fn button_interactions_system(
-    mut interaction_query: Query<(&Interaction, &Children),
-        (Changed<Interaction>, With<StartAdventureButton>)>,
-    mut text_query: Query<&mut Text>,
-    mut next_state: ResMut<NextState<AppState>>,
-) {
-    for (interaction, children)
-    in &mut interaction_query {
-        let mut text = text_query.get_mut(children[0]).unwrap();
-        match *interaction {
-            Interaction::Clicked => {
-                next_state.set(AppState::Intro);
-            }
-            Interaction::Hovered => {
-                text.sections[0].value = "- New Adventure -".to_string();
-            }
-            Interaction::None => {
-                text.sections[0].value = "New Adventure".to_string();
-            }
-        }
-    }
-}
-
-
-fn spawn_entity_instances(
-    mut commands: Commands,
-    player_q: Query<(Entity, &EntityInstance, &Transform, &GlobalTransform), (Added<EntityInstance>, Without<Ship>)>,
-    mut bob_ship_q: Query<&mut Transform, With<Ship>>,
-    asset_server: Res<AssetServer>,
-    mut texture_atlases: ResMut<Assets<TextureAtlas>>,
-) {
-    for
-    (entity, instance, p_transform, global_transform)
-    in player_q.iter() {
-        match instance.identifier.as_ref() {
-            "Player" => {
-                if bob_ship_q.is_empty() {
-                    println!("Creating Bob's Ship");
-                    let texture_handle = asset_server.load("Bob's Ship-sheet.png");
-                    let texture_atlas =
-                        TextureAtlas::from_grid(texture_handle, Vec2::new(32.0, 32.0), 2, 1, None, None);
-                    let texture_atlas_handle = texture_atlases.add(texture_atlas);
-                    let bob_bundle = (
-                        Ship,
-                        SpriteSheetBundle {
-                            texture_atlas: texture_atlas_handle,
-                            transform: *p_transform,
-                            ..default()
-                        },
-                        RigidBody::Dynamic,
-                        GravityScale(0.),
-                        Velocity::zero(),
-                        Speed(90.),
-                        AnimationState::default()
-                    );
-                    commands.entity(entity).insert(bob_bundle).with_children(|parent| {
-                        let mut light_beam_translation = Transform::from(*global_transform);
-                        light_beam_translation.translation.x += 8. * 9.;
-                        light_beam_translation.translation.z += 1.;
-                        parent.spawn((InteractLightBeam,
-                                      SpriteBundle {
-                                          texture: asset_server.load("Laser Lvl 1.png"),
-                                          transform: light_beam_translation,
-                                          visibility: Visibility::Hidden,
-                                          ..default()
-                                      }));
-                    });
-                } else {
-                    println!("Moving Bob's Ship");
-                    for mut transform in bob_ship_q.iter_mut() {
-                        transform.translation = p_transform.translation;
-                    }
-                }
-            }
-            "LightSpeed" => {
-                let texture_handle = asset_server.load("light speed.png");
-                let texture_atlas =
-                    TextureAtlas::from_grid(texture_handle, Vec2::new(448., 224.), 16, 1, None, None);
-                let texture_atlas_handle = texture_atlases.add(texture_atlas);
-                let animation = Animation(benimator::Animation::from_indices(
-                    0..=15,
-                    FrameRate::from_fps(10.0),
-                ));
-                commands.entity(entity).insert((
-                    LightSpeed,
-                    SpriteSheetBundle {
-                        texture_atlas: texture_atlas_handle,
-                        transform: *p_transform,
-                        visibility: Visibility::Hidden,
-                        ..default()
-                    },
-                    animation,
-                    AnimationState::default(),
-                ));
-            }
-            _ => {}
-        }
-    }
+    ui::create_main_menu(&mut commands, &asset_server);
 }
 
 fn position_camera_at_ship(
@@ -346,7 +159,7 @@ fn boost_input(
     if key_input.just_pressed(KeyCode::LShift) {
         for (ship, mut speed) in ship_q.iter_mut() {
             speed.0 += 70.;
-            add_blinking_animation(&mut commands, ship);
+            animation::add_blinking_animation(&mut commands, ship);
         }
     }
     if key_input.just_released(KeyCode::LShift) {
@@ -369,7 +182,7 @@ fn beam_input(
             commands.entity(beam).insert(Visibility::Visible);
         }
         for ship in ship_q.iter() {
-            add_blinking_animation(&mut commands, ship);
+            animation::add_blinking_animation(&mut commands, ship);
         }
     }
     if mouse_input.just_released(MouseButton::Left) {
@@ -379,49 +192,5 @@ fn beam_input(
         for ship in ship_q.iter() {
             commands.entity(ship).remove::<Animation>();
         }
-    }
-}
-
-fn add_blinking_animation(commands: &mut Commands, ship: Entity) {
-    let animation = Animation(benimator::Animation::from_indices(
-        0..=1,
-        FrameRate::from_fps(7.0),
-    ));
-    commands.entity(ship).insert(animation);
-}
-
-fn animation_system(
-    time: Res<Time>,
-    mut query: Query<(&mut AnimationState, &mut TextureAtlasSprite, &Animation)>,
-) {
-    for (mut state, mut texture, animation) in query.iter_mut() {
-        state.update(animation, time.delta());
-        texture.index = state.frame_index();
-    }
-}
-
-fn movement_input(
-    mut player_q: Query<(&mut Velocity, &Speed), With<Ship>>,
-    keyboard_input: Res<Input<KeyCode>>,
-) {
-    for (mut velocity, speed) in player_q.iter_mut() {
-        let mut direction = Vec2::default();
-        handle_keyboard_input(&keyboard_input, &mut direction);
-        velocity.linvel = direction.normalize_or_zero() * speed.0;
-    };
-}
-
-fn handle_keyboard_input(keyboard_input: &Res<Input<KeyCode>>, direction: &mut Vec2) {
-    if keyboard_input.pressed(KeyCode::W) {
-        direction.y += 1.0;
-    }
-    if keyboard_input.pressed(KeyCode::S) {
-        direction.y -= 1.0;
-    }
-    if keyboard_input.pressed(KeyCode::A) {
-        direction.x -= 1.0;
-    }
-    if keyboard_input.pressed(KeyCode::D) {
-        direction.x += 1.0;
     }
 }
