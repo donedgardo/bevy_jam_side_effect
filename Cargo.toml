@@ -8,9 +8,31 @@ debug-mode = []
 
 [dependencies]
 benimator = "4.1.2"
-bevy = "0.10.1"
+bevy = { version = "0.10.1", default-features = false, features = [
+    "animation",
+    "bevy_asset",
+    "bevy_gilrs",
+    "bevy_scene",
+    "bevy_winit",
+    "bevy_core_pipeline",
+    "bevy_pbr",
+    "bevy_gltf",
+    "bevy_render",
+    "bevy_sprite",
+    "bevy_text",
+    "bevy_ui",
+    "png",
+    "hdr",
+    "ktx2",
+    "zstd",
+    "x11",
+    "filesystem_watcher",
+    "android_shared_stdcxx",
+    "tonemapping_luts",
+]}
 bevy-inspector-egui = "0.18.3"
 bevy_ecs_ldtk = { version = "0.6.0", features = ["atlas"] }
+bevy_kira_audio = { version = "0.15.0", features = ["mp3"] }
 bevy_rapier2d = { version = "0.21.0", features = ["enhanced-determinism", "wasm-bindgen", "debug-render-2d"] }
 
 [target.wasm32-unknown-unknown]

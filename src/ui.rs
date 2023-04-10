@@ -2,8 +2,8 @@ use bevy::prelude::*;
 use bevy::asset::AssetServer;
 use bevy::hierarchy::{BuildChildren, Children, DespawnRecursiveExt};
 use bevy_ecs_ldtk::LevelSelection;
-use crate::AppState;
-use crate::level::LightSpeed;
+use crate::{AppState, BeamUpEvent, Ship};
+use crate::level::{Element251, Gold, Health, Herbs, Item, LightSpeed, Organism, ShieldArtifact, Water, WeaponArtifact, YellowOrganism};
 
 pub fn create_main_menu(commands: &mut Commands, asset_server: &Res<AssetServer>) {
     commands.spawn((MainMenuUI, NodeBundle {
@@ -65,13 +65,73 @@ pub fn create_main_menu(commands: &mut Commands, asset_server: &Res<AssetServer>
 #[derive(Component)]
 pub struct MainMenuUI;
 
-pub fn clean_main_ui(
+pub fn clean_up_ui<T: Component>(
     mut commands: Commands,
-    query: Query<Entity, With<MainMenuUI>>,
+    query: Query<Entity, With<T>>,
 ) {
     for entity in query.iter() {
         commands.entity(entity).despawn_recursive();
     }
+}
+
+#[derive(Component)]
+pub struct GameOverUI;
+
+pub fn setup_game_over(mut commands: Commands, asset_server: Res<AssetServer>) {
+    commands.insert_resource(LevelSelection::Index(1));
+    commands.spawn((GameOverUI, NodeBundle {
+        style: Style {
+            justify_content: JustifyContent::Center,
+            align_items: AlignItems::Center,
+            size: Size::new(Val::Percent(100.), Val::Percent(100.)),
+            ..default()
+        },
+        ..default()
+    })).with_children(|parent| {
+        parent.spawn(NodeBundle {
+            style: Style {
+                flex_direction: FlexDirection::Column,
+                size: Size::new(Val::Percent(100.), Val::Px(350.)),
+                justify_content: JustifyContent::SpaceBetween,
+                align_items: AlignItems::Center,
+                ..default()
+            },
+            ..default()
+        }).with_children(|parent| {
+            parent.spawn(TextBundle::from_section(
+                "Game Over!",
+                TextStyle {
+                    font: asset_server.load("fonts/JollyLodger-Regular.ttf"),
+                    font_size: 128.,
+                    color: Color::hex("#FFF").unwrap(),
+                },
+            ));
+            parent.spawn((StartAdventureButton, ButtonBundle {
+                style: Style {
+                    size: Size::UNDEFINED,
+                    justify_content: JustifyContent::Center,
+                    align_items: AlignItems::Center,
+                    ..default()
+                },
+                background_color: BackgroundColor(Color::Rgba {
+                    red: 0.0,
+                    green: 0.0,
+                    blue: 0.0,
+                    alpha: 0.0,
+                }),
+                ..default()
+            })).with_children(|parent| {
+                parent.spawn(TextBundle::from_section(
+                    "New Game",
+                    TextStyle {
+                        font: asset_server.load("fonts/static/JetBrainsMono-Regular.ttf"),
+                        font_size: 40.,
+                        ..default()
+                    },
+                ));
+            });
+        });
+    });
 }
 
 pub fn menu_button_interactions_system(
@@ -136,20 +196,13 @@ pub fn dialog_interaction_system(
     }
 }
 
+
 #[derive(Component)]
 pub struct IntroUI;
 
-pub fn clean_intro_ui(
+pub fn load_level(
     mut commands: Commands,
-    light_query: Query<Entity, With<LightSpeed>>,
-    ui_query: Query<Entity, With<IntroUI>>,
 ) {
-    for entity in ui_query.iter() {
-        commands.entity(entity).despawn_recursive();
-    }
-    for entity in light_query.iter() {
-        commands.entity(entity).insert(Visibility::Hidden);
-    }
     commands.insert_resource(LevelSelection::Index(0));
 }
 
@@ -158,12 +211,17 @@ pub fn setup_intro(
     mut commands: Commands,
     light_query: Query<Entity, With<LightSpeed>>,
     asset_server: Res<AssetServer>,
+    org_query: Query<Entity, With<Item>>,
 ) {
+    for entity in org_query.iter() {
+        commands.entity(entity).despawn_recursive();
+    }
     let dialog = DialogState(vec![
+        "\"PS: Ship is fixed with 'wasd' for travel, whatever that means\"".to_string(),
         "\"For science!\"\n- Bob.".to_string(),
         "\"With this new material I can now cancel the effects of inertia\nand safely travel at light speeds!!\"".to_string(),
         "\"Its been a journey but I finally found material 251 on the planet 3.\"".to_string(),
-        "Journal Entry: Day 1".to_string(),
+        "Journal Entry: Day 1 - Click".to_string(),
     ]);
     commands.insert_resource(dialog);
     for entity in light_query.iter() {
@@ -216,7 +274,25 @@ pub struct InGameUI;
 #[derive(Component)]
 pub struct PanelText;
 
+#[derive(Component)]
+pub struct InventoryPanel;
+
+#[derive(Component)]
+pub struct HealthText;
+
+#[derive(Component)]
+pub struct InventoryText;
+
+#[derive(Component)]
+pub struct InventoryButton;
+
+#[derive(Resource)]
+pub struct PanelMainText(pub String);
+
 pub fn setup_game_ui(mut commands: Commands, asset_server: Res<AssetServer>) {
+    commands.insert_resource(PanelMainText("\"There is a powerful artifact in this world.\n\
+    Where could it be?\"\n\
+    -Bob".to_string()));
     commands.spawn((InGameUI, NodeBundle {
         style: Style {
             justify_content: JustifyContent::Center,
@@ -228,29 +304,40 @@ pub fn setup_game_ui(mut commands: Commands, asset_server: Res<AssetServer>) {
     })).with_children(|parent| {
         parent.spawn(NodeBundle {
             style: Style {
-                size: Size::new(Val::Percent(100.), Val::Px(160.)),
+                size: Size::new(Val::Percent(100.), Val::Px(130.)),
                 justify_content: JustifyContent::SpaceBetween,
                 ..default()
             },
-            background_color: BackgroundColor(Color::hex("#fff").unwrap()),
             ..default()
         }).with_children(|parent| {
             parent.spawn(NodeBundle {
                 style: Style {
                     size: Size::new(Val::Percent(25.), Val::Percent(100.)),
-                    ..default()
-                },
-                background_color: BackgroundColor(Color::hex("#aaa").unwrap()),
-                ..default()
-            });
-            parent.spawn(NodeBundle {
-                style: Style {
-                    size: Size::new(Val::Percent(50.), Val::Percent(100.)),
                     justify_content: JustifyContent::Center,
                     align_items: AlignItems::Center,
                     ..default()
                 },
-                background_color: BackgroundColor(Color::hex("#000").unwrap()),
+                background_color: Color::rgba(27. / 255., 10. / 255., 40. / 255., 0.9).into(),
+                ..default()
+            }).with_children(|parent| {
+                parent.spawn((HealthText, TextBundle::from_section(
+                    "",
+                    TextStyle {
+                        font: asset_server.load("fonts/static/JetBrainsMono-Light.ttf"),
+                        font_size: 18.,
+                        ..default()
+                    })));
+            });
+            parent.spawn(NodeBundle {
+                style: Style {
+                    size: Size::new(Val::Percent(50.), Val::Percent(100.)),
+                    min_size: Size::new(Val::Px(300.), Val::Percent(100.)),
+                    justify_content: JustifyContent::Center,
+                    align_items: AlignItems::Center,
+                    flex_wrap: FlexWrap::Wrap,
+                    ..default()
+                },
+                background_color: Color::rgba(27. / 255., 10. / 255., 40. / 255., 0.9).into(),
                 ..default()
             }).with_children(|parent| {
                 parent.spawn((PanelText, TextBundle::from_section(
@@ -261,14 +348,116 @@ pub fn setup_game_ui(mut commands: Commands, asset_server: Res<AssetServer>) {
                         ..default()
                     })));
             });
-            parent.spawn(NodeBundle {
+            parent.spawn((InventoryPanel, NodeBundle {
                 style: Style {
                     size: Size::new(Val::Percent(25.), Val::Percent(100.)),
+                    flex_wrap: FlexWrap::Wrap,
                     ..default()
                 },
-                background_color: BackgroundColor(Color::hex("#555").unwrap()),
+                background_color: Color::rgba(27. / 255., 10. / 255., 40. / 255., 0.9).into(),
                 ..default()
-            });
+            }));
         });
     });
+}
+
+pub fn inventory_interactions(
+    mut commands: Commands,
+    mut interaction_query: Query<(&Interaction, Entity, &Item), (Changed<Interaction>, With<InventoryButton>)>,
+    mut panel_main_text: ResMut<PanelMainText>,
+    mut health_q: Query<&mut Health, With<Ship>>,
+    herb_q: Query<&Herbs>,
+) {
+    for (interaction, entity, item) in interaction_query.iter_mut() {
+        match *interaction {
+            Interaction::Clicked => {
+                if herb_q.get(entity).is_ok() {
+                    for mut health in health_q.iter_mut() {
+                        if health.current < health.max {
+                            health.current += 1.;
+                        }
+                    }
+                }
+                commands.entity(entity).despawn_recursive();
+                panel_main_text.0 = "".to_string();
+            }
+            Interaction::None => {
+                panel_main_text.0 = "".to_string();
+            }
+            Interaction::Hovered => {
+                panel_main_text.0 = format!("{}\nLeft-click to use.", item.description);
+            }
+        }
+    }
+}
+
+pub fn health_ui(
+    health_q: Query<&Health, (Or<(Changed<Health>, Added<Health>)>, With<Ship>)>,
+    mut text_q: Query<&mut Text, With<HealthText>>,
+) {
+    for health in health_q.iter() {
+        for mut text in text_q.iter_mut() {
+            text.sections[0].value = format!("Life Support: {}/{}", health.current, health.max);
+        }
+    }
+}
+
+pub fn inventory_ui(
+    mut commands: Commands,
+    mut beam_up_event: EventReader<BeamUpEvent>,
+    inventory_panel_q: Query<Entity, With<InventoryPanel>>,
+    item_q: Query<&Item>,
+    herb_q: Query<&Herbs>,
+    org_q: Query<&Organism>,
+    yellow_q: Query<&YellowOrganism>,
+    gold_q: Query<&Gold>,
+    element_q: Query<&Element251>,
+    water_q: Query<&Water>,
+    weapon_q: Query<&WeaponArtifact>,
+    shield_q: Query<&ShieldArtifact>,
+) {
+    if let Ok(inventory_panel) = inventory_panel_q.get_single() {
+        for ev in beam_up_event.iter() {
+            if let Ok(item) = item_q.get(ev.0) {
+                let id = commands.spawn((
+                    InventoryButton,
+                    item.clone(),
+                    ButtonBundle {
+                        style: Style {
+                            padding: UiRect::new(Val::Px(2.), Val::Px(2.), Val::Px(2.), Val::Px(2.)),
+                            size: Size::new(Val::Px(24.), Val::Px(24.)),
+                            ..default()
+                        },
+                        image: UiImage::new(item.texture.clone()),
+                        ..default()
+                    })).id();
+                if let Ok(element) = herb_q.get(ev.0) {
+                    commands.entity(id).insert(element.clone());
+                }
+                if let Ok(element) = org_q.get(ev.0) {
+                    commands.entity(id).insert(element.clone());
+                }
+                if let Ok(element) = yellow_q.get(ev.0) {
+                    commands.entity(id).insert(element.clone());
+                }
+                if let Ok(element) = gold_q.get(ev.0) {
+                    commands.entity(id).insert(element.clone());
+                }
+                if let Ok(element) = element_q.get(ev.0) {
+                    commands.entity(id).insert(element.clone());
+                }
+                if let Ok(element) = water_q.get(ev.0) {
+                    commands.entity(id).insert(element.clone());
+                }
+                if let Ok(element) = weapon_q.get(ev.0) {
+                    commands.entity(id).insert(element.clone());
+                }
+                if let Ok(element) = shield_q.get(ev.0) {
+                    commands.entity(id).insert(element.clone());
+                }
+                commands.entity(ev.0).despawn_recursive();
+                commands.entity(inventory_panel).add_child(id);
+            }
+        }
+    }
 }

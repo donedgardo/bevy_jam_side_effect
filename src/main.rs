@@ -1,18 +1,23 @@
+use std::time::Duration;
 use bevy::prelude::*;
+use bevy_kira_audio::AudioPlugin;
 use bevy::window::PrimaryWindow;
 use bevy_ecs_ldtk::{LdtkPlugin, LdtkWorldBundle, LevelSelection};
 use bevy_rapier2d::prelude::*;
 use animation::Animation;
 use camera::MainCamera;
+use level::{Damage, DamageCollider};
 use movement::Speed;
-use crate::level::{Herbs, ResourceNameplate};
-use crate::ui::PanelText;
+use crate::audio::start_background_audio;
+use crate::level::{AggroRange, Health, Inventory, Item, ResourceNameplate};
+use crate::ui::{GameOverUI, InGameUI, IntroUI, inventory_interactions, inventory_ui, MainMenuUI, PanelMainText, PanelText};
 
 mod ui;
 mod level;
 mod animation;
 mod camera;
 mod movement;
+mod audio;
 
 #[derive(States, Clone, PartialEq, Eq, Debug, Hash, Default)]
 pub enum AppState {
@@ -20,7 +25,9 @@ pub enum AppState {
     MainMenu,
     Intro,
     InGame,
+    GameOver,
 }
+
 
 fn main() {
     let mut app = App::new();
@@ -39,6 +46,8 @@ fn main() {
         }));
     app.add_plugin(RapierPhysicsPlugin::<NoUserData>::default());
     app.add_plugin(LdtkPlugin);
+    app.add_plugin(AudioPlugin);
+    app.add_system(start_background_audio.on_startup());
     #[cfg(feature = "debug-mode")]
     {
         use bevy_inspector_egui::quick::WorldInspectorPlugin;
@@ -50,14 +59,23 @@ fn main() {
     app.add_system(setup_start_menu.in_schedule(OnEnter(AppState::MainMenu)));
     app.add_system(camera::setup_main_camera.in_schedule(OnEnter(AppState::MainMenu)));
     app.add_system(ui::menu_button_interactions_system.in_set(OnUpdate(AppState::MainMenu)));
-    app.add_system(ui::clean_main_ui.in_schedule(OnExit(AppState::MainMenu)));
+    app.add_system(ui::clean_up_ui::<MainMenuUI>.in_schedule(OnExit(AppState::MainMenu)));
     app.add_system(ui::setup_intro.in_schedule(OnEnter(AppState::Intro)));
     app.add_system(ui::dialog_interaction_system.in_set(OnUpdate(AppState::Intro)));
-    app.add_system(ui::clean_intro_ui.in_schedule(OnExit(AppState::Intro)));
+    app.add_systems((ui::clean_up_ui::<IntroUI>, ui::load_level).chain().in_schedule(OnExit(AppState::Intro)));
     app.add_system(ui::setup_game_ui.in_schedule(OnEnter(AppState::InGame)));
+    app.add_system(ui::health_ui.in_set(OnUpdate(AppState::InGame)));
     app.add_system(camera_follow_ship.in_set(OnUpdate(AppState::InGame)));
-    app.add_system(beam_up.in_set(OnUpdate(AppState::InGame)));
-    app.add_system(panel_text_update.in_set(OnUpdate(AppState::InGame)));
+    app.add_systems((handle_collisions, beam_up).chain().in_set(OnUpdate(AppState::InGame)));
+    app.add_systems((handle_aggro, aggro_movement).chain().in_set(OnUpdate(AppState::InGame)));
+    app.add_systems((handle_collision_damage, handle_damage).chain().in_set(OnUpdate(AppState::InGame)));
+    app.add_system(ui::clean_up_ui::<InGameUI>.in_schedule(OnExit(AppState::InGame)));
+    app.add_system(ui::setup_game_over.in_schedule(OnEnter(AppState::GameOver)));
+    app.add_system(ui::menu_button_interactions_system.in_set(OnUpdate(AppState::GameOver)));
+    app.add_system(ui::clean_up_ui::<GameOverUI>.in_schedule(OnExit(AppState::GameOver)));
+    app.add_event::<BeamUpEvent>();
+    app.add_system(inventory_ui.in_set(OnUpdate(AppState::InGame)));
+    app.add_systems((panel_text_update, inventory_interactions).chain().in_set(OnUpdate(AppState::InGame)));
     app.add_system(position_camera_at_ship);
     app.add_system(movement::movement_input);
     app.add_system(level::spawn_entity_instances);
@@ -65,9 +83,9 @@ fn main() {
     app.add_system(beam_input);
     app.add_system(boost_input);
     app.add_system(animation::animation_system);
-    app.add_system(handle_collisions);
     app.run();
 }
+
 
 #[derive(Component)]
 pub struct Ship;
@@ -81,23 +99,128 @@ struct LdtkImageHolder(Handle<Image>);
 #[derive(Resource)]
 struct UnderBeamItems(Vec<Entity>);
 
+#[derive(Component)]
+struct Aggro(Entity);
+
+fn handle_aggro(
+    mut commands: Commands,
+    mut collision_events: EventReader<CollisionEvent>,
+    ship_q: Query<Entity, With<Ship>>,
+    aggro_range_q: Query<&Parent, With<AggroRange>>,
+) {
+    for collision_event in collision_events.iter() {
+        match collision_event {
+            CollisionEvent::Started(e1, e2, _) => {
+                if let Ok(ship) = ship_q.get(*e1) {
+                    if let Ok(parent) = aggro_range_q.get(*e2) {
+                        commands.entity(parent.get()).insert(Aggro(ship));
+                    }
+                } else if let Ok(ship) = ship_q.get(*e2) {
+                    if let Ok(parent) = aggro_range_q.get(*e1) {
+                        commands.entity(parent.get()).insert(Aggro(ship));
+                    }
+                }
+            }
+            CollisionEvent::Stopped(e1, e2, _) => {
+                if ship_q.get(*e1).is_ok() {
+                    if let Ok(parent) = aggro_range_q.get(*e2) {
+                        commands.entity(parent.get()).remove::<Aggro>().insert(Velocity::zero());
+                    }
+                } else if ship_q.get(*e2).is_ok() {
+                    if let Ok(parent) = aggro_range_q.get(*e1) {
+                        commands.entity(parent.get()).remove::<Aggro>().insert(Velocity::zero());
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn handle_collision_damage(
+    mut commands: Commands,
+    mut collision_events: EventReader<CollisionEvent>,
+    ship_q: Query<Entity, With<Ship>>,
+    damage_q: Query<&DamageCollider>,
+) {
+    for collision_event in collision_events.iter() {
+        match collision_event {
+            CollisionEvent::Started(e1, e2, _) => {
+                if let Ok(damage) = damage_q.get(*e1) {
+                    if let Ok(ship) = ship_q.get(*e2) {
+                        commands.entity(ship).insert(Damage(damage.0, Timer::new(Duration::from_millis(150), TimerMode::Repeating)));
+                    }
+                } else if let Ok(damage) = damage_q.get(*e2) {
+                    if let Ok(ship) = ship_q.get(*e1) {
+                        commands.entity(ship).insert(Damage(damage.0, Timer::new(Duration::from_millis(150), TimerMode::Repeating)));
+                    }
+                }
+            }
+            CollisionEvent::Stopped(e1, e2, _) => {
+                if damage_q.get(*e1).is_ok() {
+                    if let Ok(ship) = ship_q.get(*e2) {
+                        commands.entity(ship).remove::<Damage>();
+                    }
+                } else if damage_q.get(*e2).is_ok() {
+                    if let Ok(ship) = ship_q.get(*e1) {
+                        commands.entity(ship).remove::<Damage>();
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn handle_damage(
+    time: Res<Time>,
+    mut damage_q: Query<(&mut Damage, &mut Health), With<Ship>>,
+    mut next_state: ResMut<NextState<AppState>>,
+) {
+    for (mut damage, mut health) in damage_q.iter_mut() {
+        damage.1.tick(time.delta());
+        if damage.1.just_finished() {
+            health.current -= damage.0;
+        }
+        if health.current <= 0. {
+            next_state.set(AppState::GameOver);
+        }
+    }
+}
+
+fn aggro_movement(
+    mut aggro_query: Query<(&Aggro, &Speed, &Transform, &mut Velocity)>,
+    transform_q: Query<&Transform>,
+) {
+    for (aggro, speed, aggro_transform, mut velocity) in aggro_query.iter_mut() {
+        if let Ok(transform) = transform_q.get(aggro.0) {
+            let difference = transform.translation - aggro_transform.translation;
+            velocity.linvel = Vec2::new(difference.x, difference.y).normalize_or_zero() * speed.0;
+        }
+    }
+}
+
 fn handle_collisions(
     mut commands: Commands,
     mut collision_events: EventReader<CollisionEvent>,
-    herbs_query: Query<(&Children, &Herbs)>,
+    herbs_query: Query<(&Children, &Item)>,
     resource_label_query: Query<&ResourceNameplate>,
-    mut description_text_query: Query<&mut Text, With<PanelText>>,
+    beam_q: Query<&InteractLightBeam>,
     mut under_beam: ResMut<UnderBeamItems>,
 ) {
     for collision_event in collision_events.iter() {
         match collision_event {
             CollisionEvent::Started(e1, e2, _) => {
-                for entity in vec![e1, e2].into_iter() {
-                    if let Ok((children, herb)) = herbs_query.get(*entity) {
-                        under_beam.0.push(*entity);
-                        for mut text in description_text_query.iter_mut() {
-                            text.sections[0].value = herb.description.clone();
+                if let Ok((children, _)) = herbs_query.get(*e1) {
+                    if beam_q.get(*e2).is_ok() {
+                        under_beam.0.push(*e1);
+                        for child in children.iter() {
+                            if resource_label_query.get(*child).is_ok() {
+                                commands.entity(*child).insert(Visibility::Visible);
+                            }
                         }
+                    }
+                } else if let Ok((children, _)) = herbs_query.get(*e2) {
+                    if beam_q.get(*e1).is_ok() {
+                        under_beam.0.push(*e2);
                         for child in children.iter() {
                             if resource_label_query.get(*child).is_ok() {
                                 commands.entity(*child).insert(Visibility::Visible);
@@ -108,21 +231,10 @@ fn handle_collisions(
             }
             CollisionEvent::Stopped(e1, e2, _) => {
                 for entity in vec![e1, e2].into_iter() {
-                    if let Ok((children, herb)) = herbs_query.get(*entity) {
+                    if let Ok((children, _)) = herbs_query.get(*entity) {
                         if let Some(index) = under_beam.0.iter().position(|x| x == entity) {
                             under_beam.0.remove(index);
                         };
-                        if under_beam.0.is_empty() {
-                            for mut text in description_text_query.iter_mut() {
-                                text.sections[0].value = "".to_string();
-                            }
-                        } else {
-                            if let Ok((_, herb)) = herbs_query.get(*under_beam.0.last().unwrap()) {
-                                for mut text in description_text_query.iter_mut() {
-                                    text.sections[0].value = herb.description.to_string();
-                                }
-                            }
-                        }
                         for child in children.iter() {
                             if resource_label_query.get(*child).is_ok() {
                                 commands.entity(*child).insert(Visibility::Hidden);
@@ -138,32 +250,18 @@ fn handle_collisions(
 fn panel_text_update(
     mut panel_query: Query<&mut Text, With<PanelText>>,
     under_beam: Res<UnderBeamItems>,
-    herb_query: Query<&Herbs>,
+    herb_query: Query<&Item>,
+    panel_main_text: Res<PanelMainText>,
 ) {
     for mut text in panel_query.iter_mut() {
         if under_beam.0.is_empty() {
-            text.sections[0].value = "".to_string();
+            text.sections[0].value = panel_main_text.0.clone();
         } else {
             let item = under_beam.0.last().unwrap();
             if let Ok(herb) = herb_query.get(*item) {
-                text.sections[0].value = herb.description.clone();
+                text.sections[0].value = format!("{}\nHit Spacebar to beam up.", herb.description);
             }
         }
-
-    }
-
-}
-
-fn beam_up(
-    mut commands: Commands,
-    mut under_beam: ResMut<UnderBeamItems>,
-    mouse_input: Res<Input<MouseButton>>,
-    herb_query: Query<&Herbs>,
-) {
-    if !mouse_input.just_pressed(MouseButton::Right) || under_beam.0.is_empty() { return; }
-    let item = under_beam.0.pop().unwrap();
-    if herb_query.get(item).is_ok() {
-        commands.entity(item).despawn_recursive();
     }
 }
 
@@ -297,3 +395,24 @@ fn beam_input(
         }
     }
 }
+
+pub struct BeamUpEvent(Entity);
+
+fn beam_up(
+    mut under_beam: ResMut<UnderBeamItems>,
+    input: Res<Input<KeyCode>>,
+    item_query: Query<&Item>,
+    mut ev_beam_up: EventWriter<BeamUpEvent>,
+    mut inventory_query: Query<&mut Inventory, With<Ship>>,
+) {
+    if !input.just_pressed(KeyCode::Space) || under_beam.0.is_empty() { return; }
+    let beamed_entity = under_beam.0.pop().unwrap();
+    if let Ok(herb) = item_query.get(beamed_entity) {
+        if let Ok(mut inventory) = inventory_query.get_single_mut() {
+            inventory.add(herb);
+            ev_beam_up.send(BeamUpEvent(beamed_entity));
+        }
+    }
+}
+
+
