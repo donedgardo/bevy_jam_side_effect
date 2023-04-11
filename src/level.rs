@@ -8,9 +8,10 @@ use bevy_rapier2d::dynamics::{GravityScale, RigidBody, Velocity};
 use bevy_rapier2d::geometry::{ActiveEvents, Collider, Sensor};
 use benimator::FrameRate;
 
-use crate::{InteractLightBeam, Ship};
+use crate::beams::InteractLightBeam;
 use crate::animation::{Animation, AnimationState};
 use crate::movement::Speed;
+use crate::ship::Ship;
 
 #[derive(Component, Clone)]
 pub struct Item {
@@ -86,6 +87,9 @@ pub struct ShieldArtifact;
 #[derive(Component)]
 pub struct AggroRange;
 
+#[derive(Component)]
+pub struct DestructiveLightBeam;
+
 pub fn spawn_entity_instances(
     mut commands: Commands,
     player_q: Query<(Entity, &EntityInstance, &Transform, &GlobalTransform), (Added<EntityInstance>, Without<Ship>)>,
@@ -128,6 +132,20 @@ pub fn spawn_entity_instances(
                                           texture: asset_server.load("Laser Lvl 1.png"),
                                           transform: light_beam_translation,
                                           visibility: Visibility::Hidden,
+                                          ..default()
+                                      }));
+                        let mut destructive_beam_translation = Transform::from(*global_transform);
+                        destructive_beam_translation.translation.x += 8. * 10.;
+                        destructive_beam_translation.translation.z += 1.;
+                        let texture_handle = asset_server.load("destructive-beam-sheet.png");
+                        let texture_atlas =
+                            TextureAtlas::from_grid(texture_handle, Vec2::new(128., 48.0), 8, 1, None, None);
+                        let texture_atlas_handle = texture_atlases.add(texture_atlas);
+                        parent.spawn((DestructiveLightBeam,
+                                      SpriteSheetBundle {
+                                          texture_atlas: texture_atlas_handle,
+                                          transform: destructive_beam_translation,
+                                          visibility: Visibility::Visible,
                                           ..default()
                                       }));
                     });

@@ -2,7 +2,7 @@ use bevy::prelude::{Component, KeyCode, Query, Res, With};
 use bevy::input::Input;
 use bevy::math::Vec2;
 use bevy_rapier2d::dynamics::Velocity;
-use crate::Ship;
+use crate::ship::Ship;
 
 pub fn movement_input(
     mut player_q: Query<(&mut Velocity, &Speed), With<Ship>>,

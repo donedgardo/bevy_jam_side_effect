@@ -2,8 +2,10 @@ use bevy::prelude::*;
 use bevy::asset::AssetServer;
 use bevy::hierarchy::{BuildChildren, Children, DespawnRecursiveExt};
 use bevy_ecs_ldtk::LevelSelection;
-use crate::{AppState, BeamUpEvent, Ship};
+use crate::AppState;
+use crate::beams::{BeamUpEvent, UnderBeamItems};
 use crate::level::{Element251, Gold, Health, Herbs, Item, LightSpeed, Organism, ShieldArtifact, Water, WeaponArtifact, YellowOrganism};
+use crate::ship::Ship;
 
 pub fn create_main_menu(commands: &mut Commands, asset_server: &Res<AssetServer>) {
     commands.spawn((MainMenuUI, NodeBundle {
@@ -457,6 +459,24 @@ pub fn inventory_ui(
                 }
                 commands.entity(ev.0).despawn_recursive();
                 commands.entity(inventory_panel).add_child(id);
+            }
+        }
+    }
+}
+
+pub fn panel_text_update(
+    mut panel_query: Query<&mut Text, With<PanelText>>,
+    under_beam: Res<UnderBeamItems>,
+    herb_query: Query<&Item>,
+    panel_main_text: Res<PanelMainText>,
+) {
+    for mut text in panel_query.iter_mut() {
+        if under_beam.0.is_empty() {
+            text.sections[0].value = panel_main_text.0.clone();
+        } else {
+            let item = under_beam.0.last().unwrap();
+            if let Ok(herb) = herb_query.get(*item) {
+                text.sections[0].value = format!("{}\nHit Spacebar to beam up.", herb.description);
             }
         }
     }
