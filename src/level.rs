@@ -145,7 +145,7 @@ pub fn spawn_entity_instances(
                                       SpriteSheetBundle {
                                           texture_atlas: texture_atlas_handle,
                                           transform: destructive_beam_translation,
-                                          visibility: Visibility::Visible,
+                                          visibility: Visibility::Hidden,
                                           ..default()
                                       }));
                     });

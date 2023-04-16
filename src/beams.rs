@@ -47,19 +47,52 @@ pub fn beam_input(
     }
 }
 
+#[cfg(test)]
+mod beam_tests {
+    use bevy::input::{ButtonState, InputPlugin};
+    use bevy::input::keyboard::KeyboardInput;
+    use bevy::prelude::*;
+    use super::*;
+
+    #[test]
+    fn it_adds_to_inventory_when_beam_up() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugin(InputPlugin::default());
+        app.add_event::<BeamUpEvent>();
+        app.insert_resource(UnderBeamItems(vec![Entity::from_raw(0)]));
+        app.add_system(beam_up);
+
+        let player = app.world.spawn(
+            (Ship,Inventory::new(30))
+        ).id();
+
+        app.world.send_event(KeyboardInput {
+            scan_code: 0,
+            key_code: Option::from(KeyCode::Space),
+            state: ButtonState::Pressed,
+        });
+
+        app.update();
+
+        let inventory = app.world.entity(player).get::<Inventory>();
+        assert_eq!(inventory.iter().len(), 1);
+    }
+}
+
 
 pub fn beam_up(
-    mut under_beam: ResMut<UnderBeamItems>,
     input: Res<Input<KeyCode>>,
     item_query: Query<&Item>,
     mut ev_beam_up: EventWriter<BeamUpEvent>,
     mut inventory_query: Query<&mut Inventory, With<Ship>>,
+    mut under_beam: ResMut<UnderBeamItems>,
 ) {
     if !input.just_pressed(KeyCode::Space) || under_beam.0.is_empty() { return; }
     let beamed_entity = under_beam.0.pop().unwrap();
-    if let Ok(herb) = item_query.get(beamed_entity) {
+    if let Ok(item) = item_query.get(beamed_entity) {
         if let Ok(mut inventory) = inventory_query.get_single_mut() {
-            inventory.add(herb);
+            inventory.add(item);
             ev_beam_up.send(BeamUpEvent(beamed_entity));
         }
     }

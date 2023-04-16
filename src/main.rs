@@ -24,7 +24,6 @@ mod audio;
 mod beams;
 mod ship;
 mod aggro;
-mod destructive_beam;
 mod damage;
 mod cursor;
 
@@ -55,13 +54,13 @@ fn main() {
     app.add_plugin(RapierPhysicsPlugin::<NoUserData>::default());
     app.add_plugin(LdtkPlugin);
     app.add_plugin(AudioPlugin);
-    app.add_system(start_background_audio.on_startup());
     #[cfg(feature = "debug-mode")]
     {
         use bevy_inspector_egui::quick::WorldInspectorPlugin;
         app.add_plugin(WorldInspectorPlugin::new());
         app.add_plugin(RapierDebugRenderPlugin::default());
     }
+    app.add_system(start_background_audio.on_startup());
     app.add_state::<AppState>();
     app.insert_resource(UnderBeamItems(vec![]));
     app.add_system(setup_start_menu.in_schedule(OnEnter(AppState::MainMenu)));
